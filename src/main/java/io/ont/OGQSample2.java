@@ -144,7 +144,7 @@ public class OGQSample2 {
         }
     }
 
-    public static String ATTESTATION_ADDON_ID = "14";
+    public static String ATTESTATION_ADDON_ID = "19";
 
     private OntSdk ontSdk;
     private Account account;
@@ -179,13 +179,19 @@ public class OGQSample2 {
         Map params = new HashMap();
         params.put("pubKey", Helper.toHexString(account.serializePublicKey()));
         params.put("hashes", hashes);
-        if (sign)
-            params.put("signature", Helper.toHexString(account.generateSignature(Helper.hexToBytes(hashes[0]), account.getSignatureScheme(), null)));
+        if (sign) {
+            StringBuilder stringBuilder = new StringBuilder();
+            for (String s : hashes) {
+                stringBuilder.append(s);
+            }
+            params.put("signature", Helper.toHexString(account.generateSignature(Helper.hexToBytes(stringBuilder.toString()), account.getSignatureScheme(), null)));
+        }
         return rpc.call(id, method, params);
     }
 
     public String batchAdd(String id, String[] hashes) throws Exception {
         Object result = call(id, "batchAdd", hashes, true);
+        System.out.println(result);
         try {
             return (String) result;
         } catch (Exception e) {
@@ -260,9 +266,13 @@ public class OGQSample2 {
 
 //        OGQSample2 sample = new OGQSample2("ogq.dat", 0, "123456");
         OGQSample2 sample = new OGQSample2("wallet.dat",
-                0, "123456");
+                0, "abc123");
 //        sample.initialize("https://attestation.ont.io", "http://polaris1.ont.io:20336");
-        sample.initialize("http://107.150.112.175:2020/addon/attestation/", "http://dappnode1.ont.io:20336", "123");
+        sample.initialize("http://107.150.112.175:2020/addon/attestation", "http://polaris1.ont.io:20336", "did:ont:Ad2enBhzZpvpxsqjKjP3qT9NhxhY4XneRd");
+
+        // confirm
+        String confirmHash = sample.confirm();
+        System.out.println("confirmHash:" + confirmHash);
 
         // generate test hash with SHA256
         MessageDigest md = MessageDigest.getInstance("SHA256");
@@ -273,37 +283,38 @@ public class OGQSample2 {
         md.update("test3".getBytes());
         String hashHex3 = Helper.toHexString(md.digest());
 
+        System.out.println("hashHex:" + hashHex);
         // add attestation request
-//        try {
-//            sample.batchAdd("1", new String[]{hashHex, hashHex2, hashHex3});
-//        } catch (RpcException e) {
-//            System.err.println(e.getMessage());
-//
-//            // parse for duplicate error if necessary
-//            String[] dupHashes = sample.parseDuplicateError(e);
-//            System.out.println(String.format("duplicated hashes: %s", Arrays.toString(dupHashes)));
-//        } catch (Exception e) {
-//            System.err.println(e.getMessage());
-//        }
-//
-//        // get proof of the attestation
-//        try {
-//            Proof proof = sample.getProof("1", hashHex);
-//            System.out.println(proof);
-//        } catch (Exception e) {
-//            System.err.println(e.getMessage());
-//        }
-//
-//        // trust server and verify it
-//        try {
-//            boolean result = sample.verify("1", hashHex, true);
-//            System.out.println(result);
-//        } catch (Exception e) {
-//            System.err.println(e.getMessage());
-//        }
+        try {
+        sample.batchAdd("1", new String[]{hashHex, hashHex2, hashHex3});
+        } catch (RpcException e) {
+            System.err.println(e.getMessage());
 
-        // get hashes by txHash
-        List<String> hashes = sample.getHashes("9bcc2208df2ea68b233d357aa12c7ddbe82e53d7a653707019bbdf0ef4ab874c");
+            // parse for duplicate error if necessary
+            String[] dupHashes = sample.parseDuplicateError(e);
+            System.out.println(String.format("duplicated hashes: %s", Arrays.toString(dupHashes)));
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+        }
+
+        // get proof of the attestation
+        try {
+            Proof proof = sample.getProof("1", hashHex);
+            System.out.println(proof);
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+        }
+
+        // trust server and verify it
+        try {
+            boolean result = sample.verify("1", hashHex, true);
+            System.out.println(result);
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+        }
+
+//         get hashes by txHash
+        List<String> hashes = sample.getHashes("9ab547042e3dcba2dbe206374ca87925a5a4dc806eb8725110b76e767c2f6d9e");
     }
 
     public List<String> getHashes(String hash) throws Exception {
@@ -336,7 +347,7 @@ public class OGQSample2 {
         CONTRACT_ADDRESS = (String) rpc.call("1", "GetContractAddress", null);
         // construct transaction
         List<Object> params = new ArrayList<>();
-        byte[] invokeCode = WasmScriptBuilder.createWasmInvokeCode(CONTRACT_ADDRESS, "verifyController", params);
+        byte[] invokeCode = WasmScriptBuilder.createWasmInvokeCode(CONTRACT_ADDRESS, "verifySignature", params);
         InvokeWasmCode tx = new InvokeWasmCode(invokeCode);
         tx.payer = account.getAddressU160();
         tx.gasLimit = 20000L;
