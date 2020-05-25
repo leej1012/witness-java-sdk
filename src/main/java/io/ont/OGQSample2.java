@@ -259,7 +259,7 @@ public class OGQSample2 {
     public static void main(String[] args) throws Exception {
 
 //        OGQSample2 sample = new OGQSample2("ogq.dat", 0, "123456");
-        OGQSample2 sample = new OGQSample2("C:\\Users\\Lee\\Documents\\WeChat Files\\lj_So1012\\FileStorage\\File\\2020-05\\wallet_lij.dat",
+        OGQSample2 sample = new OGQSample2("wallet.dat",
                 0, "123456");
 //        sample.initialize("https://attestation.ont.io", "http://polaris1.ont.io:20336");
         sample.initialize("http://107.150.112.175:2020/addon/attestation/", "http://dappnode1.ont.io:20336", "123");
