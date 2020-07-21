@@ -1,5 +1,6 @@
 package io.ont;
 
+import com.alibaba.fastjson.util.Base64;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -11,6 +12,8 @@ import com.github.ontio.common.UInt256;
 import com.github.ontio.core.payload.InvokeWasmCode;
 import com.github.ontio.core.scripts.WasmScriptBuilder;
 import com.github.ontio.core.transaction.Attribute;
+import com.github.ontio.crypto.MnemonicCode;
+import com.github.ontio.crypto.SignatureScheme;
 import com.github.ontio.io.BinaryReader;
 import com.github.ontio.merkle.MerkleVerifier;
 import com.github.ontio.network.exception.RpcException;
@@ -25,7 +28,7 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.util.*;
 
-public class OGQSample2 {
+public class AttestationSdk {
 
     public enum Error {
         SUCCESS(0),
@@ -144,29 +147,51 @@ public class OGQSample2 {
         }
     }
 
-    public static String ATTESTATION_ADDON_ID = "19";
 
     private OntSdk ontSdk;
     private Account account;
     private addonRpc rpc;
 
-    public OGQSample2(String filePath, String address, String password) throws Exception {
+    public AttestationSdk(String filePath, String address, String password) throws Exception {
         ontSdk = OntSdk.getInstance();
         ontSdk.openWalletFile(filePath);
         account = ontSdk.getWalletMgr().getAccount(address, password);
     }
 
-    public OGQSample2(String filePath, int index, String password) throws Exception {
+    public AttestationSdk(String mnemonicCodes) throws Exception {
+        ontSdk = OntSdk.getInstance();
+        byte[] privateKeyFromMnemonicCodes = getPrivateKeyFromMnemonicCodes(mnemonicCodes);
+        account = new Account(privateKeyFromMnemonicCodes, SignatureScheme.SHA256WITHECDSA);
+    }
+
+    public AttestationSdk(String keyStore, String password) throws Exception {
+        ontSdk = OntSdk.getInstance();
+        String keystore = keyStore.replace("\\", "");
+        JSONObject jsonObject = JSON.parseObject(keystore);
+        String key = jsonObject.getString("key");
+        String address = jsonObject.getString("address");
+        String saltStr = jsonObject.getString("salt");
+
+        int scrypt = jsonObject.getJSONObject("scrypt").getIntValue("n");
+        String privateKey = Account.getGcmDecodedPrivateKey(key, password, address, Base64.decodeFast(saltStr), scrypt, SignatureScheme.SHA256WITHECDSA);
+        account = new Account(Helper.hexToBytes(privateKey), SignatureScheme.SHA256WITHECDSA);
+    }
+
+    public AttestationSdk(String filePath, int index, String password) throws Exception {
         ontSdk = OntSdk.getInstance();
         ontSdk.openWalletFile(filePath);
         String address = ontSdk.getWalletMgr().getWallet().getAccounts().get(index).address;
         account = ontSdk.getWalletMgr().getAccount(address, password);
     }
 
-    public void initialize(String rpcUrl, String chainNodeUrl, String tenantId) throws Exception {
-        rpc = new addonRpc(rpcUrl, ATTESTATION_ADDON_ID, tenantId);
+    public void initialize(String rpcUrl, String chainNodeUrl, String tenantId, String addonId) throws Exception {
+        rpc = new addonRpc(rpcUrl, addonId, tenantId);
         ontSdk.setRpc(chainNodeUrl);
         ontSdk.setDefaultConnect(ontSdk.getRpc());
+    }
+
+    public byte[] getPrivateKeyFromMnemonicCodes(String mnemonicCodes) throws Exception {
+        return MnemonicCode.getPrikeyFromMnemonicCodesStrBip44(mnemonicCodes);
     }
 
     protected Object call(String id, String method, String[] hashes) throws Exception {
@@ -198,6 +223,12 @@ public class OGQSample2 {
             throw new RuntimeException(e);
         }
     }
+
+    public String getContractAddress() throws Exception {
+        CONTRACT_ADDRESS = (String) rpc.call("1", "GetContractAddress", null);
+        return CONTRACT_ADDRESS;
+    }
+
 
     protected Proof getProof(String id, String hash) throws Exception {
         JSONObject result = (JSONObject) call(id, "verify", new String[]{hash});
@@ -260,46 +291,52 @@ public class OGQSample2 {
     }
 
     // the contract will be updated accordingly
-    public static String CONTRACT_ADDRESS = "a1586ac9d2d3d66cb93a4bb6a7c29291b8fbc1d9";
+    public static String CONTRACT_ADDRESS = "";
 
     public static void main(String[] args) throws Exception {
 
-//        OGQSample2 sample = new OGQSample2("ogq.dat", 0, "123456");
-        OGQSample2 sample = new OGQSample2("wallet.dat",
-                0, "abc123");
-//        sample.initialize("https://attestation.ont.io", "http://polaris1.ont.io:20336");
-        sample.initialize("http://107.150.112.175:2020/addon/attestation", "http://polaris1.ont.io:20336", "did:ont:Ad2enBhzZpvpxsqjKjP3qT9NhxhY4XneRd");
+//        AttestationSdk sdk = new AttestationSdk("C:\\Users\\xxx\\wallet.dat",
+//                0, "123456");
+
+        AttestationSdk sdk = new AttestationSdk("{\"scrypt\":{\"dkLen\":64,\"n\":16384,\"p\":8,\"r\":8},\"address\":\"AXVvpDHbVhFBLMos2H5ZcA3yEYYx5Q8kSW\",\"key\":\"ea5vQNxYqRx0yya8y6qkdmX/W38I98qXOAJHV0E/84kUqD1pJsPprz1AFSlmuWEf\",\"label\":\"leeMain\",\"type\":\"I\",\"algorithm\":\"ECDSA\",\"salt\":\"qvBeCxzfL3/mPPT9WTOQ9A==\",\"parameters\":{\"curve\":\"P-256\"}}",
+                "123456");
+
+        // testNode:http://polaris1.ont.io:20336; mainNode:http://dappnode1.ont.io:20336
+        sdk.initialize("http://106.75.209.209:2020/addon/attestation",
+                "http://polaris2.ont.io:20336", "did:ont:APtt9sLUgqj4dzh3zJ42tAxxJZWsg6jCuK", "15");
+
+        // get Contract address
+        sdk.getContractAddress();
 
         // confirm
-        String confirmHash = sample.confirm();
+        String confirmHash = sdk.confirm();
         System.out.println("confirmHash:" + confirmHash);
 
         // generate test hash with SHA256
         MessageDigest md = MessageDigest.getInstance("SHA256");
-        md.update("test".getBytes());
+        md.update("test4".getBytes());
         String hashHex = Helper.toHexString(md.digest());
-        md.update("test2".getBytes());
+        md.update("test5".getBytes());
         String hashHex2 = Helper.toHexString(md.digest());
-        md.update("test3".getBytes());
+        md.update("test6".getBytes());
         String hashHex3 = Helper.toHexString(md.digest());
 
-        System.out.println("hashHex:" + hashHex);
         // add attestation request
         try {
-        sample.batchAdd("1", new String[]{hashHex, hashHex2, hashHex3});
+            sdk.batchAdd("1", new String[]{hashHex, hashHex2, hashHex3});
         } catch (RpcException e) {
             System.err.println(e.getMessage());
-
             // parse for duplicate error if necessary
-            String[] dupHashes = sample.parseDuplicateError(e);
+            String[] dupHashes = sdk.parseDuplicateError(e);
             System.out.println(String.format("duplicated hashes: %s", Arrays.toString(dupHashes)));
         } catch (Exception e) {
             System.err.println(e.getMessage());
         }
 
-        // get proof of the attestation
+        Thread.sleep(30000);
+        // get proof of the attestation. it may wait for 30 second
         try {
-            Proof proof = sample.getProof("1", hashHex);
+            Proof proof = sdk.getProof("1", hashHex);
             System.out.println(proof);
         } catch (Exception e) {
             System.err.println(e.getMessage());
@@ -307,19 +344,21 @@ public class OGQSample2 {
 
         // trust server and verify it
         try {
-            boolean result = sample.verify("1", hashHex, true);
+            boolean result = sdk.verify("1", hashHex, true);
             System.out.println(result);
         } catch (Exception e) {
             System.err.println(e.getMessage());
         }
 
 //         get hashes by txHash
-        List<String> hashes = sample.getHashes("9ab547042e3dcba2dbe206374ca87925a5a4dc806eb8725110b76e767c2f6d9e");
+//        List<String> hashes = sdk.getHashes("01e80da85b18b5ed113d4eea08b4c3d6855c2b8eb004a8fd972b6065ae2987ac");
+//        for (String hash : hashes) {
+//            System.err.println(hash);
+//        }
     }
 
     public List<String> getHashes(String hash) throws Exception {
         InvokeWasmCode transaction = (InvokeWasmCode) ontSdk.getConnect().getTransaction(hash);
-
         BinaryReader reader = new BinaryReader(new ByteArrayInputStream(transaction.invokeCode));
         byte[] contractBytes = reader.readBytes(20);
         String contractStr = Helper.toHexString(contractBytes);
@@ -350,8 +389,8 @@ public class OGQSample2 {
         byte[] invokeCode = WasmScriptBuilder.createWasmInvokeCode(CONTRACT_ADDRESS, "verifySignature", params);
         InvokeWasmCode tx = new InvokeWasmCode(invokeCode);
         tx.payer = account.getAddressU160();
-        tx.gasLimit = 20000L;
-        tx.gasPrice = 500;
+        tx.gasLimit = 20000;
+        tx.gasPrice = 2500;
         tx.attributes = new Attribute[0];
         tx.nonce = (new Random()).nextInt();
         ontSdk.addSign(tx, account);
