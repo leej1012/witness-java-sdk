@@ -1,1 +1,0 @@
-mvn install:install-file -DgroupId=com.github.ontio -DartifactId=ontology-sdk-java -Dversion=v1.0.16 -Dpackaging=jar -Dfile=ontology-sdk-java-v1.0.16.jar

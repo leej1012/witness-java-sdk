@@ -1,4 +1,4 @@
-package io.ont;
+package io.ont.sdk;
 
 import com.alibaba.fastjson.util.Base64;
 import com.alibaba.fastjson.JSON;
@@ -6,7 +6,6 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.github.ontio.OntSdk;
 import com.github.ontio.account.Account;
-import com.github.ontio.common.ErrorCode;
 import com.github.ontio.common.Helper;
 import com.github.ontio.common.UInt256;
 import com.github.ontio.core.payload.InvokeWasmCode;
@@ -17,140 +16,19 @@ import com.github.ontio.crypto.SignatureScheme;
 import com.github.ontio.io.BinaryReader;
 import com.github.ontio.merkle.MerkleVerifier;
 import com.github.ontio.network.exception.RpcException;
+import io.ont.error.AttestationError;
+import io.ont.rpc.AddonRpc;
+import io.ont.proof.Proof;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.security.MessageDigest;
 import java.util.*;
 
 public class AttestationSdk {
 
-    public enum Error {
-        SUCCESS(0),
-        INVALID_PARAM(41001),
-        ADDHASH_FAILED(41002),
-        VERIFY_FAILED(41003),
-        NODE_OUTSERVICE(41004),
-        NO_AUTH(41005);
-
-        private int code;
-
-        Error(int code) {
-            this.code = code;
-        }
-
-        public int getCode() {
-            return code;
-        }
-    }
-
-    class addonRpc {
-        private final URL url;
-        private String addonId, tenantId;
-        public String JSON_RPC_VERSION = "2.0";
-
-        public addonRpc(String url, String addonId, String tenantId) throws MalformedURLException {
-            this.url = new URL(url);
-            this.addonId = addonId;
-            this.tenantId = tenantId;
-        }
-
-        public String getHost() {
-            return url.getHost() + " " + url.getPort();
-        }
-
-        public Object call(String id, String method, Object params) throws RpcException, IOException {
-            Map request = new HashMap();
-            request.put("jsonrpc", JSON_RPC_VERSION);
-            request.put("method", method);
-            request.put("params", params);
-            request.put("id", id);
-//            System.out.println(String.format("POST url=%s, body=%s", this.url, JSON.toJSONString(request)));
-
-            Map response = (Map) send(request);
-            if (response == null) {
-                throw new RpcException(0, ErrorCode.ConnectUrlErr(url + " response is null. maybe is connect error"));
-            } else if ((int) response.get("error") == 0) {
-                return response.get("result");
-            } else {
-                throw new RpcException(0, JSON.toJSONString(response));
-            }
-        }
-
-        public Object send(Object request) throws IOException {
-            try {
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                connection.setRequestMethod("POST");
-                connection.setRequestProperty("addonID", addonId);
-                connection.setRequestProperty("tenantID", tenantId);
-                connection.setDoOutput(true);
-                try (OutputStreamWriter w = new OutputStreamWriter(connection.getOutputStream())) {
-                    w.write(JSON.toJSONString(request));
-                }
-                try (InputStreamReader r = new InputStreamReader(connection.getInputStream())) {
-                    StringBuffer temp = new StringBuffer();
-                    int c = 0;
-                    while ((c = r.read()) != -1) {
-                        temp.append((char) c);
-                    }
-//                    System.out.println("result: " + temp.toString());
-                    return JSON.parseObject(temp.toString(), Map.class);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            return null;
-        }
-    }
-
-    class Proof {
-        private UInt256 root;
-        private int size, blockheight, index;
-        private UInt256[] proof;
-
-        public Proof(UInt256 root, int size, int blockheight, int index, UInt256[] proof) {
-            this.root = root;
-            this.size = size;
-            this.blockheight = blockheight;
-            this.index = index;
-            this.proof = proof;
-        }
-
-        public UInt256 getRoot() {
-            return root;
-        }
-
-        public int getSize() {
-            return size;
-        }
-
-        public int getBlockHeight() {
-            return blockheight;
-        }
-
-        public int getIndex() {
-            return index;
-        }
-
-        public UInt256[] getProof() {
-            return proof;
-        }
-
-        @Override
-        public String toString() {
-            return String.format("block height: %d, size: %d, index: %d, root: %s, proof: %s", blockheight, size, index, root, Arrays.toString(proof));
-        }
-    }
-
-
     private OntSdk ontSdk;
     private Account account;
-    private addonRpc rpc;
+    private AddonRpc rpc;
+    public String contractAddress;
 
     public AttestationSdk(String filePath, String address, String password) throws Exception {
         ontSdk = OntSdk.getInstance();
@@ -184,10 +62,11 @@ public class AttestationSdk {
         account = ontSdk.getWalletMgr().getAccount(address, password);
     }
 
-    public void initialize(String rpcUrl, String chainNodeUrl, String tenantId, String addonId) throws Exception {
-        rpc = new addonRpc(rpcUrl, addonId, tenantId);
+    public void initialize(String rpcUrl, String chainNodeUrl, String tenantId, String addonId, String contractAddress) throws Exception {
+        rpc = new AddonRpc(rpcUrl, addonId, tenantId);
         ontSdk.setRpc(chainNodeUrl);
         ontSdk.setDefaultConnect(ontSdk.getRpc());
+        this.contractAddress = contractAddress;
     }
 
     public byte[] getPrivateKeyFromMnemonicCodes(String mnemonicCodes) throws Exception {
@@ -225,12 +104,12 @@ public class AttestationSdk {
     }
 
     public String getContractAddress() throws Exception {
-        CONTRACT_ADDRESS = (String) rpc.call("1", "GetContractAddress", null);
-        return CONTRACT_ADDRESS;
+        contractAddress = (String) rpc.call("1", "GetContractAddress", null);
+        return contractAddress;
     }
 
 
-    protected Proof getProof(String id, String hash) throws Exception {
+    public Proof getProof(String id, String hash) throws Exception {
         JSONObject result = (JSONObject) call(id, "verify", new String[]{hash});
         try {
             List<UInt256> proofs = new ArrayList<>();
@@ -239,7 +118,7 @@ public class AttestationSdk {
             }
             UInt256[] ps = new UInt256[proofs.size()];
             proofs.toArray(ps);
-            Proof proof = this.new Proof(new UInt256(Helper.hexToBytes((String) result.get("root"))),
+            Proof proof = new Proof(new UInt256(Helper.hexToBytes((String) result.get("root"))),
                     (int) result.get("size"), (int) result.get("blockheight"), (int) result.get("index"), ps
             );
             return proof;
@@ -254,11 +133,11 @@ public class AttestationSdk {
     }
 
     private boolean verifyBlock(Proof proof) throws Exception {
-        for (Object o : (JSONArray) ontSdk.getConnect().getSmartCodeEvent(proof.blockheight)) {
+        for (Object o : (JSONArray) ontSdk.getConnect().getSmartCodeEvent(proof.blockHeight)) {
             try {
                 for (Object nObj : (JSONArray) ((Map) o).get("Notify")) {
                     Map m = (Map) nObj;
-                    if (!CONTRACT_ADDRESS.equals(m.get("ContractAddress"))) continue;
+                    if (!contractAddress.equals(m.get("ContractAddress"))) continue;
                     JSONArray state = (JSONArray) m.get("States");
                     if (proof.root.toHexString().equals(state.getString(0)) && Integer.toString(proof.size).equals(state.getString(1))) {
                         return true;
@@ -278,7 +157,7 @@ public class AttestationSdk {
 
     public String[] parseDuplicateError(RpcException e) {
         Map err = (Map) JSON.parseObject(e.getMessage(), Map.class);
-        if (Error.ADDHASH_FAILED.getCode() != (int) err.get("error")) return null;
+        if (AttestationError.ADDHASH_FAILED.getCode() != (int) err.get("error")) return null;
         if (!"ADDHASH_FAILED: duplicate hash leafs. please check.".equals(err.get("desc"))) return null;
 
         List<String> duplicatedHashes = new ArrayList<>();
@@ -290,74 +169,7 @@ public class AttestationSdk {
         return hashes;
     }
 
-    // the contract will be updated accordingly
-    public static String CONTRACT_ADDRESS = "";
-
-    public static void main(String[] args) throws Exception {
-
-//        AttestationSdk sdk = new AttestationSdk("C:\\Users\\xxx\\wallet.dat",
-//                0, "123456");
-
-        AttestationSdk sdk = new AttestationSdk("{\"scrypt\":{\"dkLen\":64,\"n\":16384,\"p\":8,\"r\":8},\"address\":\"AXVvpDHbVhFBLMos2H5ZcA3yEYYx5Q8kSW\",\"key\":\"ea5vQNxYqRx0yya8y6qkdmX/W38I98qXOAJHV0E/84kUqD1pJsPprz1AFSlmuWEf\",\"label\":\"leeMain\",\"type\":\"I\",\"algorithm\":\"ECDSA\",\"salt\":\"qvBeCxzfL3/mPPT9WTOQ9A==\",\"parameters\":{\"curve\":\"P-256\"}}",
-                "123456");
-
-        // testNode:http://polaris1.ont.io:20336; mainNode:http://dappnode1.ont.io:20336
-        sdk.initialize("http://106.75.209.209:2020/addon/attestation",
-                "http://polaris2.ont.io:20336", "did:ont:APtt9sLUgqj4dzh3zJ42tAxxJZWsg6jCuK", "15");
-
-        // get Contract address
-        sdk.getContractAddress();
-
-        // confirm
-        String confirmHash = sdk.confirm();
-        System.out.println("confirmHash:" + confirmHash);
-
-        // generate test hash with SHA256
-        MessageDigest md = MessageDigest.getInstance("SHA256");
-        md.update("test4".getBytes());
-        String hashHex = Helper.toHexString(md.digest());
-        md.update("test5".getBytes());
-        String hashHex2 = Helper.toHexString(md.digest());
-        md.update("test6".getBytes());
-        String hashHex3 = Helper.toHexString(md.digest());
-
-        // add attestation request
-        try {
-            sdk.batchAdd("1", new String[]{hashHex, hashHex2, hashHex3});
-        } catch (RpcException e) {
-            System.err.println(e.getMessage());
-            // parse for duplicate error if necessary
-            String[] dupHashes = sdk.parseDuplicateError(e);
-            System.out.println(String.format("duplicated hashes: %s", Arrays.toString(dupHashes)));
-        } catch (Exception e) {
-            System.err.println(e.getMessage());
-        }
-
-        Thread.sleep(30000);
-        // get proof of the attestation. it may wait for 30 second
-        try {
-            Proof proof = sdk.getProof("1", hashHex);
-            System.out.println(proof);
-        } catch (Exception e) {
-            System.err.println(e.getMessage());
-        }
-
-        // trust server and verify it
-        try {
-            boolean result = sdk.verify("1", hashHex, true);
-            System.out.println(result);
-        } catch (Exception e) {
-            System.err.println(e.getMessage());
-        }
-
-//         get hashes by txHash
-//        List<String> hashes = sdk.getHashes("01e80da85b18b5ed113d4eea08b4c3d6855c2b8eb004a8fd972b6065ae2987ac");
-//        for (String hash : hashes) {
-//            System.err.println(hash);
-//        }
-    }
-
-    public List<String> getHashes(String hash) throws Exception {
+    public List<String> getHashesByTxHash(String hash) throws Exception {
         InvokeWasmCode transaction = (InvokeWasmCode) ontSdk.getConnect().getTransaction(hash);
         BinaryReader reader = new BinaryReader(new ByteArrayInputStream(transaction.invokeCode));
         byte[] contractBytes = reader.readBytes(20);
@@ -381,12 +193,12 @@ public class AttestationSdk {
     }
 
     // Confirmation of rights
-    private String confirm() throws Exception {
+    public String confirm() throws Exception {
         // get contract address
-        CONTRACT_ADDRESS = (String) rpc.call("1", "GetContractAddress", null);
+        contractAddress = (String) rpc.call("1", "GetContractAddress", null);
         // construct transaction
         List<Object> params = new ArrayList<>();
-        byte[] invokeCode = WasmScriptBuilder.createWasmInvokeCode(CONTRACT_ADDRESS, "verifySignature", params);
+        byte[] invokeCode = WasmScriptBuilder.createWasmInvokeCode(contractAddress, "verifySignature", params);
         InvokeWasmCode tx = new InvokeWasmCode(invokeCode);
         tx.payer = account.getAddressU160();
         tx.gasLimit = 20000;
